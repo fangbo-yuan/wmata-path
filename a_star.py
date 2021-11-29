@@ -115,14 +115,17 @@ def backtrack(current_node):
         current = current.parent
     return path[::-1], list(set(visited_routes))
 
-def a_star(start_coord, end_coord, station_list):
+def a_star(start_coord, end_coord, station_list, max_iterations=500):
     print('beginning a* algo')
+    print('start coord:', start_coord)
+    print('end coord:', end_coord)
 
     start = get_closest_station(start_coord, station_list)
     end = get_closest_station(end_coord, station_list)
 
     print('START:', start)
     print('END:', end)
+    print([s for s in station_list if '52*1' in s['routes']])
 
     # assume start and end are in the station dict format
     start_node = Node(None, start['lat'], start['long'], start['name'], start['type'], start['routes'])
@@ -135,9 +138,11 @@ def a_star(start_coord, end_coord, station_list):
     heapq.heappush(open_list, start_node)
 
     outer_iterations = 0
-    max_iterations = 100
+    switch_flag = False
     while len(open_list) > 0:
         outer_iterations += 1
+        if outer_iterations % 1000 == 0:
+            print('iteration:', outer_iterations)
         if outer_iterations > max_iterations:
             print("Cannot find optimal path. Re-trying algorithm with start and end station matching.")
             # find new start node
@@ -154,36 +159,50 @@ def a_star(start_coord, end_coord, station_list):
             if new_start_miles > (1/3):
                 print('Considering switching modes of transportation.')
                 new_eligible_stations = [s for s in station_list if s['type'] is not start_candidate['type']]
-                start_candidate = get_closest_station(start_coord, new_eligible_stations)
-                print('new', start_candidate['type'], 'station:', start_candidate)
-                new_start_miles = get_haversine_dist(start_coord[0], start_coord[1], start_candidate['lat'], start_candidate['long'])
+                start_candidate_switch = get_closest_station(start_coord, new_eligible_stations)
+                print('new starting', start_candidate_switch['type'], 'station:', start_candidate_switch)
+                new_start_miles = get_haversine_dist(start_coord[0], start_coord[1], start_candidate_switch['lat'], start_candidate_switch['long'])
                 print('this new station is', new_start_miles, 'miles away')
-                end_candidate = get_closest_station(end_coord, new_eligible_stations)
+                end_candidate_switch = get_closest_station(end_coord, new_eligible_stations)
+                print('new ending', start_candidate_switch['type'], 'station:', end_candidate_switch)
+                new_end_miles = get_haversine_dist(end_coord[0], end_coord[1], end_candidate_switch['lat'], end_candidate_switch['long'])
+                print('this new station is', new_end_miles, 'miles away')
                 # but only switch modes if this leads to less walking
-                if get_haversine_dist(start_coord[0], start_coord[1], start_candidate['lat'], start_candidate['long']) <= (1/3)\
-                and get_haversine_dist(end_coord[0], end_coord[1], end_candidate['lat'], end_candidate['long']) <= (1/3):
+                if new_start_miles <= 1 and new_end_miles <= 1:
                     print('SWITCHING MODES OF TRANSPORTATION')
-                    start = start_candidate
-                    end = end_candidate
+                    start = start_candidate_switch
+                    end = end_candidate_switch
                     print('new start:', start)
                     print('new end:', end)
                     switched_mode = True
 
+            print('start:', start)
             new_start_node = Node(None, start['lat'], start['long'], start['name'], start['type'], start['routes'])
             if switched_mode is True:
                 end_node = Node(None, end['lat'], end['long'], end['name'], end['type'], end['routes'])
 
-            # if start_node is still the same, let the algorithm run its course
+            # if start_node is still the same, do the recursive thing (describe later)
             if new_start_node == start_node:
-                if max_iterations >= 1000:
-                    print("Returning empty lists. The shortest route will require an unrealistic amount of transfers. "+
-                           "Please try Kyle's fewest transfer code.")
-                    return [], []
-                print('Having a little trouble....Increasing maximum iterations to find route.')
-                max_iterations = 1000
+                print("Reverting back to original form of transportation.")
+                # call a_star to find shortest path between original starting station and route-matching station
+                start_candidate_coord = (start_candidate['lat'], start_candidate['long'])
+                intermediate_path, intermediate_routes = a_star(start_coord, start_candidate_coord, station_list, max_iterations=10000)
+                print('LOLOLOL', intermediate_path)
+                if intermediate_path != []:
+                    print('switch_flag is true!!!')
+                    switch_flag = True
+                # if max_iterations >= 500:
+                #     print("Returning empty lists. The shortest route will require an unrealistic amount of transfers. "+
+                #            "Please try Kyle's fewest transfer code.")
+                #     return [], []
+                # print('Having a little trouble....Increasing maximum iterations to find route.')
+                new_start_node = Node(None, start_candidate['lat'], start_candidate['long'], start_candidate['name'],\
+                    start_candidate['type'], start_candidate['routes'])
+                # max_iterations = 500
 
             # clear out the heap
             open_list = []
+            closed_list = []
             heapq.heapify(open_list)
             heapq.heappush(open_list, new_start_node)
 
@@ -191,6 +210,7 @@ def a_star(start_coord, end_coord, station_list):
             outer_iterations = 0
 
         current_node = heapq.heappop(open_list)
+
         # print('heap size', len(open_list))
         # if len(open_list) > 0:
             # print('first station in open_list', open_list[0].name)
@@ -209,7 +229,13 @@ def a_star(start_coord, end_coord, station_list):
 
         if current_node == end_node:
             print('reached end')
-            return backtrack(current_node)
+            print('switch_flag status:', switch_flag)
+            if switch_flag is True:
+                intermediate_path = intermediate_path[:-1]
+                return_path, return_routes = backtrack(current_node)
+                return intermediate_path + return_path, intermediate_routes + return_routes
+            else:
+                return backtrack(current_node)
 
         # create children nodes
         children = []
@@ -218,6 +244,7 @@ def a_star(start_coord, end_coord, station_list):
         # - the 3 closest stations to the current route where the above condition doesn't hold
         neighbors = [s for s in station_list if s['name'] != current_node.name and
         route_match(s['routes'], current_node.routes, input_type='routes')]
+
         # not_transferrable = [s for s in station_list if route_match(s['routes'], current_node.routes, input_type='routes') is False]
         # closest_3 = []
         # nt_dist_list = []
@@ -229,8 +256,7 @@ def a_star(start_coord, end_coord, station_list):
         # for n in nt_dist_list:
         #   closest_3.append(not_transferrable[n['idx']])
         # neighbors += closest_3
-        # print('neighbors:', len(neighbors))
-        # print('iteration', outer_iterations)
+
         for station in neighbors:
             node_lat = station['lat']
             node_long = station['long']
@@ -245,7 +271,6 @@ def a_star(start_coord, end_coord, station_list):
             # do not search children already on the closed list
             if len([closed_child for closed_child in closed_list if closed_child == child]) > 0:
                 continue
-
             # update heuristic values for child
             child.dist_from_start = get_haversine_dist(child.lat, child.long, start_node.lat, start_node.long)
             child.dist_from_end = get_haversine_dist(child.lat, child.long, end_node.lat, end_node.long)
@@ -255,6 +280,12 @@ def a_star(start_coord, end_coord, station_list):
             if len([open_node for open_node in open_list if child == open_node]) > 0:
                 continue
             heapq.heappush(open_list, child)
+
+        # print('open list length:', len(open_list))
+        # print('closed list length:', len(closed_list))
+
+    print('No path found. Returning empty lists.')
+    return [], []
 
 def main():
     # read in data
@@ -290,10 +321,14 @@ def main():
                 route_list = []
                 for line in item.split(','):
                     route_list.append(line)
+            route_list = [r.replace(' ', '') for r in route_list]
             station['routes'] = route_list
         elif station['type'] is 'bus':
+            final_routes = []
             routes = bus_route_data[bus_route_data['Name'] == station['name']]['Routes']
-            station['routes'] = ast.literal_eval(list(set(routes))[0])
+            for r in routes:
+                final_routes += ast.literal_eval(r)
+            station['routes'] = list(set(final_routes))
 
     # some hardcoded location coordinates to test code with
     WASHINGTON_MONUMENT = (38.889484, -77.035278)
@@ -315,17 +350,18 @@ def main():
     # #new_station_list = [s for s in list_of_stations if route_match(s, start1)]
     # #path1, visited_routes1 = a_star(COLLEGE_PARK, DULLES, new_station_list)
 
+    # path0, visited_routes0 = a_star((38.989405, -76.94080600000001), (38.884917, -77.020995), list_of_stations)
+    # print(path0)
+
     # path1, visited_routes1 = a_star(COLLEGE_PARK, DULLES, list_of_stations)
     # print(path1)
-    # return
 
     # path2, visited_routes2 = a_star(COLLEGE_PARK, WASHINGTON_MONUMENT, list_of_stations)
     # print(path2)
-    # return
 
+    # print([s for s in list_of_stations if 'green' in s['routes'] and 'red' in s['routes']])
     path3, visited_routes3 = a_star(BRANCH_AVE, SHADY_GROVE, list_of_stations)
     print(path3)
-    return
 
     # if end1 in path1:
     #     return
